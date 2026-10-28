@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>연구시간</title>
+<style>
+:root{--bg:#faf9f6;--card:#fff;--ink:#1b1b20;--faint:#8d8c95;--line:#e3e0d9;--accent:#c9502f;--soft:#fbe9e3;--sat:#35619f;--sun:#b4441f;--green:#2e7d5b}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,"Noto Sans KR",sans-serif}
+#app{max-width:560px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:26px;margin:0}
+h2{font-size:16px;margin:0 0 6px}
+.top{display:flex;align-items:center;justify-content:space-between}
+.card{background:var(--card);border-radius:18px;padding:14px 16px;margin-top:12px}
+.faint{color:var(--faint);font-size:13px}
+.warn{color:var(--sun);font-size:13px;margin-top:6px}
+button{font:inherit;border:0;border-radius:22px;padding:11px 16px;min-height:44px;background:var(--accent);color:#fff;font-weight:600}
+button.soft{background:var(--soft);color:var(--accent)}
+button.plain{background:none;color:var(--accent);padding:0 12px;font-size:30px;min-height:0}
+button:disabled{opacity:.4}
+.row{display:flex;align-items:center;gap:8px}
+.grow{flex:1}
+.nav{display:flex;align-items:center}
+.nav b{flex:1;text-align:center}
+.total{font-size:32px;font-weight:700;text-align:center;margin:6px 0 4px}
+.goal{text-align:center;color:var(--faint);font-size:13px;margin-top:6px}
+.bar{height:8px;border-radius:4px;background:var(--line);margin-top:8px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:4px}
+.bar i.done{background:var(--green)}
+.wk,.grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.wk{margin:6px 0 4px;text-align:center;font-size:12px;font-weight:700;color:var(--faint)}
+.cell{border-radius:14px;background:var(--bg);text-align:center;padding:8px 0 6px;cursor:pointer}
+.cell.today{background:var(--soft)}
+.cell .n{font-size:13px;font-weight:700}
+.cell .h{font-size:14px;margin:12px 0 4px;color:var(--faint)}
+.cell .h.has{color:var(--ink);font-weight:700}
+.cell .h.ok{color:var(--green)}
+.cell .ck{font-size:10px;color:var(--green);height:12px}
+.sat{color:var(--sat)}.sun{color:var(--sun)}.today .n{color:var(--accent)}
+.rec{padding:12px 0;border-top:1px solid var(--line);cursor:pointer}
+.rec:first-of-type{border-top:0}
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:flex-end;justify-content:center;z-index:5}
+.sheet[hidden]{display:none}
+.panel{background:var(--card);width:100%;max-width:560px;border-radius:22px 22px 0 0;padding:20px 16px 28px}
+label{display:block;font-size:13px;color:var(--faint);margin-top:12px}
+input[type=datetime-local],input[type=time],input[type=number]{display:block;width:100%;font:inherit;padding:10px;border:1px solid var(--line);border-radius:12px;margin-top:4px;background:var(--card);color:var(--ink)}
+.chips{display:flex;gap:6px;margin:10px 0}
+.chip{margin:0;flex:1}
+.chip input{display:none}
+.chip span{display:block;text-align:center;padding:10px 0;border-radius:12px;background:var(--bg);color:var(--ink);font-size:14px}
+.chip input:checked+span{background:var(--accent);color:#fff}
+.dayrow{display:flex;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
+.dayrow input{width:96px}
+.sw{display:flex;align-items:center;justify-content:space-between;padding:6px 0}
+.sw input{width:22px;height:22px;accent-color:var(--accent)}
+#toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#1b1b20;color:#fff;padding:10px 16px;border-radius:20px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:9}
+#toast.on{opacity:1}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="sheet" class="sheet" hidden></div>
+<div id="toast"></div>
+<script>
+const $ = id => document.getElementById(id);
+const DOW = ['월','화','수','목','금','토','일'];
+let N = window.Native || mockNative();
+let weekOffset = 0, view = 'main';
+
+const pad = n => String(n).padStart(2, '0');
+const hhmm = ms => { const d = new Date(ms); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+const mdw = ms => { const d = new Date(ms); return `${d.getMonth() + 1}/${d.getDate()} (${DOW[(d.getDay() + 6) % 7]})`; };
+const fmt = ms => { const m = Math.floor(ms / 60000); return Math.floor(m / 60) + '시간 ' + m % 60 + '분'; };
+const fmtMin = m => m === 0 ? '없음' : m % 60 === 0 ? m / 60 + '시간' : Math.floor(m / 60) + '시간 ' + m % 60 + '분';
+const addDays = (d, n) => { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); return x; };
+const mondayOf = d => addDays(d, -((d.getDay() + 6) % 7));
+const inputVal = ms => { const d = new Date(ms); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const overlap = (list, a, b, now) => list.reduce((t, s) => t + Math.max(0, Math.min(s.end ?? now, b) - Math.max(s.start, a)), 0);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function toast(t) {
+  const el = $('toast'); el.textContent = t; el.classList.add('on');
+  clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('on'), 2600);
+}
+
+function render() {
+  if (!$('sheet').hidden) return; // don't rebuild under an open dialog
+  const st = JSON.parse(N.state());
+  $('app').innerHTML = view === 'main' ? mainView(st) : settingsView(st);
+}
+
+function mainView(st) {
+  const now = Date.now(), today = new Date();
+  const mon = addDays(mondayOf(today), 7 * weekOffset);
+  const days = [0, 1, 2, 3, 4, 5, 6].map(i => addDays(mon, i));
+  const from = days[0].getTime(), to = addDays(days[6], 1).getTime();
+  const list = JSON.parse(N.sessions(from, to));
+  const per = days.map(d => overlap(list, d.getTime(), addDays(d, 1).getTime(), now));
+  const ti = (today.getDay() + 6) % 7, goal = st.goals[ti];
+  const showGoal = weekOffset === 0 && goal > 0;
+  const same = d => d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
+
+  const status = st.ssid === null
+    ? '연구실 Wi-Fi에 연결한 뒤 아래 버튼으로 등록하세요.'
+    : `연구실 Wi-Fi <b>${esc(st.ssid)}</b><br>` + (st.openStart ? `● 연결 중 (${hhmm(st.openStart)}부터)` : '○ 연결 안 됨');
+  const warn = st.ssid !== null && !st.canRead
+    ? `<div class="warn">⚠ 위치 권한을 '항상 허용'으로 하고 위치(GPS)를 켜야 앱이 꺼져 있어도 기록됩니다.</div>` : '';
+
+  const cells = days.map((d, i) => {
+    const ms = per[i], has = ms >= 60000, ok = st.goals[i] > 0 && ms >= st.goals[i] * 60000;
+    return `<div class="cell ${same(d) ? 'today' : ''}" onclick="addAt(${d.getTime()})">
+      <div class="n ${i === 5 ? 'sat' : i === 6 ? 'sun' : ''}">${d.getDate()}</div>
+      <div class="h ${has ? 'has' : ''} ${ok ? 'ok' : ''}">${has ? (ms / 3600000).toFixed(1) + 'h' : '–'}</div>
+      <div class="ck">${ok ? '✓' : ''}</div></div>`;
+  }).join('');
+
+  const recs = list.map(s => {
+    const end = s.end === null ? '진행 중' : (new Date(s.end).getDate() === new Date(s.start).getDate() ? hhmm(s.end) : mdw(s.end) + ' ' + hhmm(s.end)) + ' · ' + fmt(s.end - s.start);
+    return `<div class="rec" onclick='editRec(${JSON.stringify(s)})'>${mdw(s.start)} ${hhmm(s.start)} – ${end}</div>`;
+  }).join('') || '<div class="faint" style="padding-top:10px">이 주에는 기록이 없어요</div>';
+
+  return `
+  <div class="top"><h1>연구시간</h1><button class="soft" onclick="go('settings')">설정</button></div>
+  <div class="card"><div>${status}</div>${warn}
+    <div style="margin-top:10px"><button class="soft" onclick="N.registerWifi()">Wi-Fi 등록 / 변경</button></div></div>
+  <div class="card">
+    <div class="nav"><button class="plain" onclick="week(-1)">‹</button>
+      <b>${weekOffset === 0 ? '이번 주  ' : ''}${days[0].getMonth() + 1}/${days[0].getDate()} – ${days[6].getMonth() + 1}/${days[6].getDate()}</b>
+      <button class="plain" onclick="week(1)" ${weekOffset < 0 ? '' : 'disabled'}>›</button></div>
+    <div class="total">${fmt(per.reduce((a, b) => a + b, 0))}</div>
+    ${showGoal ? `<div class="goal">오늘 ${fmt(per[ti])} / 목표 ${fmtMin(goal)}</div>
+      <div class="bar"><i class="${per[ti] >= goal * 60000 ? 'done' : ''}" style="width:${Math.min(100, per[ti] / (goal * 600))}%"></i></div>`
+      : weekOffset === 0 ? '<div class="goal">설정에서 하루 목표 시간을 정해보세요</div>' : ''}
+  </div>
+  <div class="card">
+    <div class="wk">${DOW.map((n, i) => `<div class="${i === 5 ? 'sat' : i === 6 ? 'sun' : ''}">${n}</div>`).join('')}</div>
+    <div class="grid">${cells}</div>
+    <div class="faint" style="margin-top:10px">날짜를 누르면 그날 기록을 직접 추가할 수 있어요</div>
+  </div>
+  <div class="card">
+    <div class="row"><h2 class="grow">${weekOffset === 0 ? '이번 주' : '이 주'} 기록</h2><button onclick="addAt(Date.now())">+ 직접 추가</button></div>
+    ${recs}
+  </div>`;
+}
+
+function settingsView(st) {
+  const dayRows = DOW.map((n, i) => `<div class="dayrow"><span class="grow">${n}요일</span>
+    <input type="number" min="0" max="24" step="0.5" value="${st.goals[i] / 60}" onchange="setDay(${i},this.value)"> <span class="faint">&nbsp;시간</span></div>`).join('');
+  const rems = st.reminders.map((r, i) => `<div class="dayrow"><span class="grow">${daysLabel(r.days)}  ${pad(Math.floor(r.min / 60))}:${pad(r.min % 60)}</span>
+    <button class="soft" onclick="delRem(${i})">삭제</button></div>`).join('') || '<div class="faint" style="padding:10px 0">등록된 알림이 없어요</div>';
+  return `
+  <div class="top"><h1>설정</h1><button class="soft" onclick="go('main')">닫기</button></div>
+  <div class="card"><h2>하루 목표 연구 시간</h2>
+    <div class="row" style="margin:8px 0"><input id="gv" type="number" min="0" max="24" step="0.5" value="8"><span class="faint">시간</span></div>
+    <div class="row"><button class="soft grow" onclick="applyGoal([0,1,2,3,4,5,6])">매일</button>
+      <button class="soft grow" onclick="applyGoal([0,1,2,3,4])">평일</button>
+      <button class="soft grow" onclick="applyGoal([5,6])">주말</button></div>
+    <div class="faint" style="margin:6px 0">0을 넣으면 목표가 없어져요. 요일마다 따로 바꿀 수도 있어요.</div>
+    ${dayRows}
+    <div class="sw" style="border-top:1px solid var(--line);margin-top:6px;padding-top:12px"><span>목표 달성하면 알림 받기</span>
+      <input type="checkbox" ${st.goalOn ? 'checked' : ''} onchange="N.setGoalOn(this.checked)"></div>
+  </div>
+  <div class="card"><h2>연구 시간 알림</h2>
+    <div class="faint">정해둔 요일·시각에 이번 주 연구 시간을 알려줘요.</div>${rems}
+    <div class="chips">${DOW.map((n, i) => `<label class="chip"><input type="checkbox" class="dw" value="${i}" ${i === 4 ? 'checked' : ''}><span>${n}</span></label>`).join('')}</div>
+    <input id="rt" type="time" value="10:00">
+    <div class="row" style="margin-top:12px"><button class="grow" onclick="addRem()">+ 알림 추가</button>
+      <button class="soft grow" onclick="N.testNotify()">알림 테스트</button></div>
+  </div>`;
+}
+
+function daysLabel(m) {
+  if (m === 127) return '매일';
+  if (m === 31) return '매주 평일';
+  if (m === 96) return '매주 주말';
+  return '매주 ' + DOW.filter((_, i) => m >> i & 1).join('·');
+}
+
+function go(v) { view = v; render(); scrollTo(0, 0); }
+function week(d) { if (weekOffset + d <= 0) { weekOffset += d; render(); } }
+
+function setDay(i, v) {
+  const h = parseFloat(v);
+  if (isNaN(h) || h < 0 || h > 24) return toast('0~24 사이 숫자를 입력해 주세요');
+  N.setGoals(JSON.stringify([i]), Math.round(h * 60)); render();
+}
+function applyGoal(days) {
+  const h = parseFloat($('gv').value);
+  if (isNaN(h) || h < 0 || h > 24) return toast('0~24 사이 숫자를 입력해 주세요');
+  N.setGoals(JSON.stringify(days), Math.round(h * 60)); render(); toast('목표를 저장했어요');
+}
+function addRem() {
+  const mask = [...document.querySelectorAll('.dw:checked')].reduce((m, c) => m | 1 << +c.value, 0);
+  const t = $('rt').value;
+  if (!mask) return toast('요일을 하나 이상 골라 주세요');
+  if (!t) return toast('시각을 골라 주세요');
+  const cur = JSON.parse(N.state()).reminders;
+  N.setReminders(JSON.stringify([...cur, { days: mask, min: +t.slice(0, 2) * 60 + +t.slice(3, 5) }])); render();
+}
+function delRem(i) {
+  if (!confirm('이 알림을 삭제할까요?')) return;
+  N.setReminders(JSON.stringify(JSON.parse(N.state()).reminders.filter((_, j) => j !== i))); render();
+}
+
+function addAt(ms) {
+  const d = new Date(ms);
+  openSheet({ start: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 9).getTime(), end: new Date(d.getFullYear(), d.getMonth(), d.getDate(), 18).getTime() });
+}
+function editRec(s) {
+  if (s.end === null) return toast('연결 중인 기록은 끝난 뒤에 수정할 수 있어요');
+  openSheet(s);
+}
+function openSheet(s) {
+  const el = $('sheet');
+  el.innerHTML = `<div class="panel"><h2>${s.id ? '기록 수정' : '기록 추가'}</h2>
+    <label>시작<input id="fs" type="datetime-local" value="${inputVal(s.start)}"></label>
+    <label>종료<input id="fe" type="datetime-local" value="${inputVal(s.end)}"></label>
+    <div class="row" style="margin-top:18px"><button class="grow" onclick="saveRec(${s.id ?? 'null'})">저장</button>
+      ${s.id ? `<button class="soft" onclick="delRec(${s.id})">삭제</button>` : ''}
+      <button class="soft" onclick="closeSheet()">취소</button></div></div>`;
+  el.hidden = false;
+}
+function closeSheet() { $('sheet').hidden = true; render(); }
+function saveRec(id) {
+  const s = new Date($('fs').value).getTime(), e = new Date($('fe').value).getTime();
+  if (isNaN(s) || isNaN(e)) return toast('날짜와 시각을 입력해 주세요');
+  if (e <= s) return toast('종료는 시작보다 늦어야 해요');
+  id === null ? N.add(s, e) : N.update(id, s, e);
+  closeSheet();
+}
+function delRec(id) { N.del(id); closeSheet(); }
+
+// Called by the Android shell: back button (true = handled) and "data changed, redraw".
+window.onBack = () => {
+  if (!$('sheet').hidden) { closeSheet(); return true; }
+  if (view !== 'main') { go('main'); return true; }
+  return false;
+};
+window.refresh = render;
+setInterval(() => { if (!document.hidden) render(); }, 15000);
+render();
+
+// Browser preview only (no Android shell): keeps data in localStorage so the screens can be tried on a PC.
+function mockNative() {
+  const g = (k, d) => JSON.parse(localStorage.getItem('m' + k) || JSON.stringify(d)), p = (k, v) => localStorage.setItem('m' + k, JSON.stringify(v));
+  const note = () => toast('미리보기예요. 휴대폰 앱에서 동작해요');
+  let id = Date.now();
+  return {
+    state: () => JSON.stringify({ ssid: 'LAB-WiFi (미리보기)', openStart: null, canRead: true, goalOn: g('goalOn', true), goals: g('goals', [0, 0, 0, 0, 0, 0, 0]), reminders: g('rem', []) }),
+    sessions: (a, b) => JSON.stringify(g('s', []).filter(x => (x.end ?? Date.now()) > a && x.start < b).sort((x, y) => y.start - x.start)),
+    add: (s, e) => p('s', [...g('s', []), { id: ++id, start: s, end: e }]),
+    update: (i, s, e) => p('s', g('s', []).map(x => x.id === i ? { id: i, start: s, end: e } : x)),
+    del: i => p('s', g('s', []).filter(x => x.id !== i)),
+    setGoals: (j, m) => { const gs = g('goals', [0, 0, 0, 0, 0, 0, 0]); JSON.parse(j).forEach(d => gs[d] = m); p('goals', gs); },
+    setGoalOn: b => p('goalOn', b), setReminders: j => p('rem', JSON.parse(j)), registerWifi: note, testNotify: note
+  };
+}
+</script>
+</body>
+</html>
